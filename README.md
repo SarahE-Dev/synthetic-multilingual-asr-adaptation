@@ -35,28 +35,6 @@ Each sample contains:
 - `tts_model_used`: Identifier of the TTS model
 - `hyp_text`: ASR system hypothesis (decoded transcript)
 
-## Project Structure
-
-```
-synthetic-multilingual-asr-adaptation/
-├── data/                    # Data processing scripts
-│   ├── generate_synthetic.py
-│   └── preprocess.py
-├── models/                  # ASR model implementations
-│   ├── whisper_eval.py
-│   └── wav2vec_eval.py
-├── tts/                     # TTS generation scripts
-│   ├── multilingual_tts.py
-│   └── config.yaml
-├── evaluation/              # Evaluation metrics and scripts
-│   ├── compute_metrics.py
-│   └── visualize_results.py
-├── notebooks/               # Jupyter notebooks for analysis
-│   └── exploratory_analysis.ipynb
-├── requirements.txt
-└── README.md
-```
-
 ## Installation
 
 ```bash
