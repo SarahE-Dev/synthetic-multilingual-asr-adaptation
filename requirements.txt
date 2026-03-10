@@ -1,0 +1,7 @@
+datasets>=2.14.0
+soundfile>=0.12.1
+huggingface_hub>=0.16.0
+TTS>=0.22.0
+faster-whisper>=1.0.0
+openai-whisper>=20231117
+setuptools>=68.0.0

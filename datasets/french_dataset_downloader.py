@@ -1,9 +1,9 @@
-# Works!!! === FR builder (MLS) — fast, with dynamic text key detection ===
+# === FR builder (MLS) — fast, with dynamic text key detection ===
 import os, time, shutil
 import soundfile as sf
 from datasets import load_dataset, Dataset, Audio
 
-BASE_OUT     = "/kaggle/working"
+BASE_OUT     = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
 MIN_FREE_MB  = 1500
 OVERWRITE    = True
 
@@ -19,8 +19,8 @@ WAV_SUBTYPE  = "PCM_16"
 
 os.makedirs(BASE_OUT, exist_ok=True)
 
-def free_mb(path="/kaggle"):
-    t,u,f = shutil.disk_usage(path)
+def free_mb(path=None):
+    t,u,f = shutil.disk_usage(path or BASE_OUT)
     return f // (2**20)
 
 def detect_text_key(example):

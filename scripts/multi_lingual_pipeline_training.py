@@ -1,28 +1,28 @@
 # === Multilingual pipeline: Build -> TTS (XTTS) -> ASR (optional) ===
 # Languages: EN, ES, FR
 # Outputs:
-#   TTS wavs: /kaggle/working/tts_outputs/<lang>/*.wav
-#   TTS manifest: /kaggle/working/tts_outputs/<lang>/manifest.jsonl
+#   TTS wavs: outputs/tts_outputs/<lang>/*.wav
+#   TTS manifest: outputs/tts_outputs/<lang>/manifest.jsonl
 #   (Optional) WER/CER summary
 
 import os, re, time, json, glob, random, subprocess, sys
 from typing import List, Optional, Dict
 
 # ------------------ TOGGLES ------------------
-RUN_BUILDERS = False      # True to (re)build small EN/ES/FR subsets
-RUN_TTS      = True
-RUN_ASR      = True       # requires faster-whisper; auto-skips if not available
+RUN_BUILDERS = os.environ.get("RUN_BUILDERS", "0") == "1"
+RUN_TTS      = os.environ.get("RUN_TTS", "1") != "0"
+RUN_ASR      = os.environ.get("RUN_ASR", "1") != "0"
 
 # ------------------ PATHS & CONFIG ------------------
-BASE_OUT = "/kaggle/working"
-OUTPUT_ROOT = f"{BASE_OUT}/tts_outputs"
+BASE_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "outputs")
+OUTPUT_ROOT = os.path.join(BASE_OUT, "tts_outputs")
 os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
 # Saved dataset dirs we will USE (created by builders or already present)
 DATASET_DIRS: Dict[str, List[str]] = {
-    "en": [f"{BASE_OUT}/tts_input_en_0p25h_ds", f"{BASE_OUT}/mls_en_0p1h_ds"],
-    "es": [f"{BASE_OUT}/mls_es_0p1h_ds"],
-    "fr": [f"{BASE_OUT}/mls_fr_0p1h_ds"],
+    "en": [os.path.join(BASE_OUT, "tts_input_en_0p25h_ds"), os.path.join(BASE_OUT, "mls_en_0p1h_ds")],
+    "es": [os.path.join(BASE_OUT, "mls_es_0p1h_ds")],
+    "fr": [os.path.join(BASE_OUT, "mls_fr_0p1h_ds")],
 }
 
 LANGS = ["en", "es", "fr"]
@@ -76,8 +76,8 @@ if RUN_BUILDERS:
     AUDIO_FMT, WAV_SUBTYPE = "WAV", "PCM_16"
     OVERWRITE = True
 
-    def free_mb(path="/kaggle"):
-        t,u,f = shutil.disk_usage(path)
+    def free_mb(path=None):
+        t,u,f = shutil.disk_usage(path or BASE_OUT)
         return f // (2**20)
 
     import shutil
@@ -371,12 +371,25 @@ if RUN_TTS:
 
 # ------------------ (C) ASR + WER/CER (optional) ------------------
 if RUN_ASR:
-    ok_asr = ensure_pkg("faster_whisper", "faster-whisper")
-    if not ok_asr:
-        print("⚠ faster-whisper not available; skipping ASR.")
-    else:
-        from faster_whisper import WhisperModel
+    # Try faster-whisper first, fall back to openai-whisper (better on macOS Apple Silicon)
+    ASR_BACKEND = None
+    if ensure_pkg("faster_whisper", "faster-whisper"):
+        try:
+            from faster_whisper import WhisperModel as FasterWhisperModel
+            FasterWhisperModel("tiny", device="cpu", compute_type="int8")
+            ASR_BACKEND = "faster-whisper"
+        except Exception:
+            pass
+    if ASR_BACKEND is None and ensure_pkg("whisper", "openai-whisper"):
+        try:
+            import whisper as openai_whisper
+            ASR_BACKEND = "openai-whisper"
+        except Exception:
+            pass
 
+    if ASR_BACKEND is None:
+        print("⚠ No ASR backend available (tried faster-whisper and openai-whisper); skipping ASR.")
+    else:
         def _lev(a: List[str], b: List[str]) -> int:
             m, n = len(a), len(b)
             dp = list(range(n+1))
@@ -394,8 +407,22 @@ if RUN_ASR:
             r, h = list(ref.lower()), list(hyp.lower())
             return 0.0 if not r and not h else (_lev(r,h) / max(1,len(r)))
 
-        print("\n=== Transcribing with faster-whisper (base, CPU, int8) ===")
-        asr = WhisperModel("base", device="cpu", compute_type="int8")
+        print(f"\n=== Transcribing with {ASR_BACKEND} (base, CPU) ===")
+        if ASR_BACKEND == "faster-whisper":
+            from faster_whisper import WhisperModel
+            asr = WhisperModel("base", device="cpu", compute_type="int8")
+        else:
+            import whisper as openai_whisper
+            asr = openai_whisper.load_model("base", device="cpu")
+
+        def transcribe_wav(wav_path: str, lang: str) -> str:
+            if ASR_BACKEND == "faster-whisper":
+                segs, _ = asr.transcribe(wav_path, beam_size=1, language=lang)
+                return " ".join(s.text.strip() for s in segs).strip()
+            else:
+                result = asr.transcribe(wav_path, language=lang, fp16=False)
+                return (result.get("text") or "").strip()
+
         results = {}
         for lang in LANGS:
             out_dir = os.path.join(OUTPUT_ROOT, lang)
@@ -411,8 +438,7 @@ if RUN_ASR:
                 wav, ref = row["wav"], row["ref_text"]
                 hyp = ""
                 try:
-                    segs, info = asr.transcribe(wav, beam_size=1, language=lang)
-                    hyp = " ".join(s.text.strip() for s in segs).strip()
+                    hyp = transcribe_wav(wav, lang)
                 except Exception as e:
                     print(f"  ✗ [{lang}] ASR failed for {os.path.basename(wav)}: {e}")
                 row["hyp_text"] = hyp
