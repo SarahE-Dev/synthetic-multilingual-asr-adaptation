@@ -8,9 +8,9 @@ This repository investigates how synthetic multilingual speech can be leveraged 
 
 ## Key Features
 
-- **Synthetic Speech Generation**: Generate multilingual synthetic speech using state-of-the-art TTS models
-- **ASR Evaluation Pipeline**: Evaluate ASR model performance on synthetic vs. authentic speech
-- **Multilingual Support**: Focus on English, Spanish, and French with extensibility to other languages
+- **Synthetic Speech Generation**: Generate multilingual synthetic speech using XTTS v2 / YourTTS
+- **ASR Evaluation Pipeline**: Evaluate ASR model performance on synthetic speech with WER/CER metrics
+- **Multilingual Support**: English, Spanish, and French with extensibility to other languages
 - **Closed-loop Analysis**: Study the TTS → ASR pipeline to understand synthetic speech characteristics
 
 ## Dataset
@@ -35,6 +35,11 @@ Each sample contains:
 - `tts_model_used`: Identifier of the TTS model
 - `hyp_text`: ASR system hypothesis (decoded transcript)
 
+## Requirements
+
+- **Python 3.11** (the Coqui TTS package requires `<3.12`)
+- macOS, Linux, or Windows
+
 ## Installation
 
 ```bash
@@ -42,53 +47,102 @@ Each sample contains:
 git clone https://github.com/nishanthp/synthetic-multilingual-asr-adaptation.git
 cd synthetic-multilingual-asr-adaptation
 
-# Create a virtual environment
-python -m venv venv
+# Create a virtual environment with Python 3.11
+python3.11 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
+### macOS (Apple Silicon) note
+
+If you don't have Python 3.11, install it with Homebrew:
+
+```bash
+brew install python@3.11
+/opt/homebrew/bin/python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
 ## Usage
 
-### 1. Generate Synthetic Speech
+### Run the full pipeline
 
-```python
-from tts.multilingual_tts import generate_synthetic_audio
-
-# Generate synthetic speech for a given text
-audio = generate_synthetic_audio(
-    text="Hello, this is a test.",
-    language="en",
-    tts_model="tts_models/multilingual/multi-dataset/your_tts"
-)
+```bash
+python main.py
 ```
 
-### 2. Evaluate ASR Models
+This will:
+1. Load a multilingual TTS model (XTTS v2, with YourTTS as fallback)
+2. Generate synthetic speech for EN, ES, and FR using built-in sample sentences
+3. Transcribe the generated audio with Whisper (faster-whisper or openai-whisper)
+4. Compute WER and CER for each language and print a summary
 
-```python
-from models.whisper_eval import evaluate_whisper
-from datasets import load_dataset
+### CLI options
 
-# Load the dataset
-dataset = load_dataset("nprak26/synthetic-multilingual-speech-asr")
-
-# Evaluate Whisper on synthetic speech
-results = evaluate_whisper(dataset, model_size="base")
-print(f"Word Error Rate: {results['wer']:.2%}")
+```bash
+python main.py                # TTS generation + ASR evaluation (default)
+python main.py --build        # Download dataset subsets first, then run pipeline
+python main.py --tts-only     # Only generate TTS audio
+python main.py --asr-only     # Only run ASR validation on existing TTS output
 ```
 
-### 3. Compare Synthetic vs. Authentic Speech
+### Build real dataset subsets
 
-```python
-from evaluation.compute_metrics import compare_speech_types
+By default the pipeline uses a small set of hardcoded sample sentences. To download real audio subsets from LibriSpeech (EN) and Multilingual LibriSpeech (ES, FR):
 
-# Compare ASR performance on synthetic and authentic data
-comparison = compare_speech_types(
-    synthetic_dataset=dataset["synthetic"],
-    authentic_dataset=dataset["authentic"]
-)
+```bash
+python main.py --build
+```
+
+You can also run the dataset downloaders individually:
+
+```bash
+python datasets/english_dataset_downloader.py
+python datasets/spanish_dataset_downloader.py
+python datasets/french_dataset_downloader.py
+```
+
+### Output structure
+
+After running, you'll find:
+
+```
+outputs/
+  tts_outputs/
+    en/
+      en_0.wav ... en_4.wav
+      manifest.jsonl
+    es/
+      es_0.wav ... es_4.wav
+      manifest.jsonl
+    fr/
+      fr_0.wav ... fr_4.wav
+      manifest.jsonl
+  _xtts_refs/
+    en_ref.wav, es_ref.wav, fr_ref.wav
+```
+
+Each `manifest.jsonl` contains one JSON object per line with `wav`, `lang`, `ref_text`, `tts_model_used`, and (after ASR) `hyp_text`, `WER`, and `CER`.
+
+## Project Structure
+
+```
+├── main.py                            # Entry point — orchestrates the full pipeline
+├── requirements.txt                   # Python dependencies
+├── datasets/
+│   ├── english_dataset_downloader.py  # LibriSpeech EN subset builder
+│   ├── spanish_dataset_downloader.py  # MLS Spanish subset builder
+│   └── french_dataset_downloader.py   # MLS French subset builder
+├── scripts/
+│   ├── multi_lingual_pipeline_training.py  # TTS generation + ASR evaluation
+│   └── asr_whisper_validation.py           # Standalone ASR validation script
+└── .github/
+    └── workflows/
+        ├── build.yml                  # CI: install, compile, test
+        └── format.yml                 # CI: ruff lint & format
 ```
 
 ## Research Applications
@@ -104,19 +158,14 @@ This project is designed for:
 ## Methodology
 
 ### TTS Generation
-- Utilize state-of-the-art multilingual TTS models (e.g., YourTTS, Coqui TTS)
+- Utilize multilingual TTS models (XTTS v2, YourTTS) via Coqui TTS
 - Generate diverse synthetic samples across multiple languages
-- Control for speaker characteristics and prosody
+- Bootstrap speaker references from single-language models when no real audio is available
 
 ### ASR Evaluation
-- Test multiple ASR architectures (Whisper, Wav2Vec2.0, HuBERT)
-- Compute standard metrics: Word Error Rate (WER), Character Error Rate (CER)
-- Analyze performance degradation on synthetic vs. authentic speech
-
-### Analysis
-- Identify TTS characteristics that impact ASR performance
-- Investigate optimal synthetic-to-authentic data ratios
-- Study cross-lingual transfer learning potential
+- Transcribe with Whisper (faster-whisper or openai-whisper, auto-selected)
+- Compute Word Error Rate (WER) and Character Error Rate (CER)
+- Per-language metrics saved to `manifest.jsonl` and `metrics.json`
 
 ## Limitations
 
